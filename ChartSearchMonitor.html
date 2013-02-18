@@ -1,0 +1,238 @@
+<html>
+<head>
+<title>Chart Search Monitor</title>
+<script type="text/javascript" src="https://ajax.googleapis.com/ajax/libs/jquery/1.9.1/jquery.min.js"></script>
+<script type="text/javascript" src="https://ajax.googleapis.com/ajax/libs/jqueryui/1.8.18/jquery-ui.min.js"></script>
+<script src="http://code.highcharts.com/highcharts.js"></script>
+<script src="http://code.highcharts.com/highcharts-more.js"></script>
+<script src="http://code.highcharts.com/modules/exporting.js"></script>
+<style type="text/css">
+#gauge {
+  width: 300px;
+  margin-left: auto;
+  margin-right: auto;
+}
+</style>
+</head>
+<body>
+<div id="gauge"></div>
+<div id="graph"></div>
+<script type="text/javascript">
+
+var numDaemons = 0;
+var numFailOverDeamons = 0;
+var daemon = [];
+var gaugeChart, graphChart;
+
+// Turn time (in milliseconds since epoch) into formatted date
+function prettyDate(time) {
+  var s = function(n) { var x=("0"+n); return x.substring(x.length-2); } // pad
+  var d = new Date(time);
+  return (d.getMonth()+1)+"/"+s(d.getDate())+" "+d.getHours()+":"+s(d.getMinutes())+":"+s(d.getSeconds());
+}
+
+// Used to generate graphs after initial data has been scanned for counts
+function init($) {
+
+  // Highcharts has awesome stuff... like this cool gauge
+  gaugeChart = new Highcharts.Chart({
+    chart: {
+      renderTo: "gauge",
+      type: "gauge",
+      plotBorderWidth: 1,
+      plotBackgroundColor: {
+        linearGradient: { x1: 0, y1: 0, x2: 0, y2: 1 },
+        stops: [
+          [0, "#FFF4C6"],
+          [0.3, "#FFFFFF"],
+          [1, "#FFF4C6"]
+        ]
+      },
+      plotBackgroundImage: null,
+      height: 180
+    },
+    title: {
+      text: null
+    },
+    pane: {
+        startAngle: -45,
+        endAngle: 45,
+        background: null,
+        center: ["50%", "135%"],
+        size: 300
+    },                  
+    yAxis: {
+      min: 0,
+      max: numDaemons,
+      minorTickPosition: "outside",
+      tickPosition: "outside",
+      labels: {
+        rotation: "auto",
+        distance: 20
+      },
+      plotBands: [{
+        from: numDaemons - numFailOverDeamons,
+        to: numDaemons,
+        color: "#C02316",
+        innerRadius: "100%",
+        outerRadius: "105%"
+      }],
+      pane: 0,
+      title: {
+        text: "Chart Search<br/><span style=\'font-size:8px\'>Server Usage</span>",
+        y: -40
+      }
+    },
+    plotOptions: {
+      gauge: {
+        dataLabels: {
+          enabled: false
+        },
+        dial: {
+          radius: "100%"
+        }
+      }
+    },
+    series: [{
+      data: [0],
+      yAxis: 0
+    }],
+    exporting: {
+      enabled:false
+    },
+    credits: {
+      enabled: false
+    }
+  });
+
+  // Graph each daemon's activity + active daemon count
+  graphChart = new Highcharts.Chart({
+    chart: {
+      renderTo: "graph",
+      margin: [70, 50, 60, 80],
+    },
+    colors: [
+      "#F0F0F0",
+      "#000000"
+    ],
+    title: {
+      text: null
+    },
+    xAxis: {
+      type: "datetime"
+    },
+    yAxis: {
+      title: {
+        text: null
+      },
+      min: 0,
+      max: numDaemons,
+      tickInterval: 1,
+      gridLineColor: "#EAEAEA"
+    },
+    legend: {
+      enabled: false
+    },
+    exporting: {
+      enabled: false
+    },
+    credits: {
+      enabled: false
+    },
+    tooltip: {
+      formatter: function() {
+        return daemon[this.y].name+"<br/><em>"+prettyDate(this.x)+"</em>";
+      }
+    },
+    plotOptions: {
+      spline: {
+        marker: {
+          enabled: false
+        },
+        enableMouseTracking: false
+      },
+      scatter: {
+        marker: {
+          symbol: "circle"
+        }
+      }
+    },
+    series: [{
+      type: "scatter",
+      data: []
+    },{
+      type: "spline",
+      data: []
+    }]
+  });
+
+  // Highcharts defaults to UTC; we wan't local times.
+  Highcharts.setOptions({
+    global: {
+      useUTC: false
+    }
+  });
+}
+
+// Initial fetch of data to scan for daemon counts & names
+$.ajax({
+  type: "GET",
+  url: "/data",
+  dataType: "xml",
+  success: function(xml) {
+    $(xml).find("daemonStatistics").find("indexUpdateDaemon").each(
+      function() {
+        var name = $(this).find("name").text();
+        var failover = ($(this).find("requestPriorities").text().indexOf("1") == 0);
+        numDaemons++;
+        if (failover)
+          numFailOverDeamons++;
+        daemon.push({"name":name, "failover":failover});
+      }
+    );
+    $(init);
+  }
+});
+
+// This function updates the graph with new data
+var daemonsActive = false; // used to stop graphing when no daemons active
+function update() {
+  $.ajax({
+    type: "GET",
+    url: "/data",
+    dataType: "xml",
+    success: function(xml) {
+      var now = Date.now();
+      var activeDaemonCount = 0;
+      $(xml).find("daemonStatistics").find("indexUpdateDaemon").each(
+        function(index, value) {
+          var status = $(this).find("status").text();
+          var statusCode;
+          if (status == "idle")
+            statusCode = 0;
+          else if (status = "processing")
+            statusCode = 1;
+          else
+            statusCode = 2;
+          if (statusCode != 0) {
+            activeDaemonCount++;
+            graphChart.series[0].addPoint([now, index+1]);
+          }
+        }
+      );
+      if (activeDaemonCount > 0 || daemonsActive) {
+        graphChart.series[1].addPoint([now, activeDaemonCount]);
+        daemonsActive = (activeDaemonCount > 0);
+      }
+      gaugeChart.series[0].points[0].update(activeDaemonCount, false);
+      gaugeChart.redraw();
+    }
+  });
+}
+
+// Update graph each second
+setInterval(update, 1000);
+
+</script>
+</body>
+</html>
