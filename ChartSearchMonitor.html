@@ -12,17 +12,24 @@
   margin-left: auto;
   margin-right: auto;
 }
+#options {
+  text-align: center;
+}
 </style>
 </head>
 <body>
 <div id="gauge"></div>
 <div id="graph"></div>
+<div id="options"></div>
 <script type="text/javascript">
 
 var numDaemons = 0;
 var numFailOverDeamons = 0;
 var daemon = [];
-var gaugeChart, graphChart;
+var gaugeChart, graphChart, scatterOption;
+var daemonsActive = false; // used to stop graphing when no daemons active
+var scatterActive = false; // used to scatter plot individual daemon activity
+var scatterExpires; // controls when scatter (individual daemon activity) disappears for better performance
 
 // Turn time (in milliseconds since epoch) into formatted date
 function prettyDate(time) {
@@ -109,7 +116,7 @@ function init($) {
   graphChart = new Highcharts.Chart({
     chart: {
       renderTo: "graph",
-      margin: [70, 50, 60, 80],
+      margin: [50, 50, 30, 50],
     },
     colors: [
       "#F0F0F0",
@@ -130,10 +137,10 @@ function init($) {
       tickInterval: 1,
       gridLineColor: "#EAEAEA"
     },
-    legend: {
+    exporting: {
       enabled: false
     },
-    exporting: {
+    legend: {
       enabled: false
     },
     credits: {
@@ -158,9 +165,11 @@ function init($) {
       }
     },
     series: [{
+      name: "Individual daemon activity",
       type: "scatter",
       data: []
     },{
+      name: "Overall daemon activity",
       type: "spline",
       data: []
     }]
@@ -172,6 +181,15 @@ function init($) {
       useUTC: false
     }
   });
+
+  scatterOption = $("<a href='#'>Show individual daemon activity</a>");
+  scatterOption.click(function() {
+    scatterActive = true;
+    scatterExpires = Date.now() + 5 * 60 * 1000; // scatter plot disappears after 5 minutes
+    scatterOption.hide();
+  });
+  $("#options").append(scatterOption);
+
 }
 
 // Initial fetch of data to scan for daemon counts & names
@@ -195,7 +213,6 @@ $.ajax({
 });
 
 // This function updates the graph with new data
-var daemonsActive = false; // used to stop graphing when no daemons active
 function update() {
   $.ajax({
     type: "GET",
@@ -216,7 +233,16 @@ function update() {
             statusCode = 2;
           if (statusCode != 0) {
             activeDaemonCount++;
-            graphChart.series[0].addPoint([now, index+1]);
+            if (scatterActive) {
+              if (Date.now() < scatterExpires) {
+                graphChart.series[0].addPoint([now, index+1]);
+              } else {
+                // scatter expired, hide scatter plot
+                scatterActive = false;
+                graphChart.series[0].setData([], true);
+                scatterOption.show();
+              }
+            }
           }
         }
       );
@@ -224,8 +250,7 @@ function update() {
         graphChart.series[1].addPoint([now, activeDaemonCount]);
         daemonsActive = (activeDaemonCount > 0);
       }
-      gaugeChart.series[0].points[0].update(activeDaemonCount, false);
-      gaugeChart.redraw();
+      gaugeChart.series[0].points[0].update(activeDaemonCount, true);
     }
   });
 }
