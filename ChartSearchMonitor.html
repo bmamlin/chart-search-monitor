@@ -182,11 +182,17 @@ function init($) {
     }
   });
 
-  scatterOption = $("<a href='#'>Show individual daemon activity</a>");
+  scatterOption = $("<a href='#'></a>");
+  scatterOption.text("Show individual daemon activity for up to 5 minutes");
   scatterOption.click(function() {
-    scatterActive = true;
-    scatterExpires = Date.now() + 5 * 60 * 1000; // scatter plot disappears after 5 minutes
-    scatterOption.hide();
+    scatterActive = !scatterActive;
+    if (scatterActive) {
+      scatterExpires = Date.now() + 5 * 60 * 1000; // scatter plot disappears after 5 minutes
+      scatterOption.text("Browser slow? Hide individual daemon activity");
+    } else {
+      scatterOption.text("Show individual daemon activity for up to 5 minutes");
+      graphChart.series[0].setData([], true);
+    }
   });
   $("#options").append(scatterOption);
 
@@ -240,7 +246,7 @@ function update() {
                 // scatter expired, hide scatter plot
                 scatterActive = false;
                 graphChart.series[0].setData([], true);
-                scatterOption.show();
+                scatterOption.text("Show individual daemon activity for up to 5 minutes");
               }
             }
           }
